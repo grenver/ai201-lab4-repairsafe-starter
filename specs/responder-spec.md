@@ -118,10 +118,9 @@ Defense in depth (backstop, not the only line): after generation, scan a refuse-
 *What should your function do if it receives a tier value that isn't "safe", "caution", or "refuse" — e.g., "unknown" while the classifier is still a stub? Write the fallback behavior and explain why.*
 
 ```
-If tier is not in VALID_TIERS (e.g. "unknown" from the classifier stub, or a typo), treat it as REFUSE — use the refuse system prompt (or return a canned referral to a professional).
+If tier is not in VALID_TIERS (e.g. "unknown" from the classifier stub, or a typo), treat it as CAUTION — use the caution system prompt.
 
-Why REFUSE here, and not "caution" like the classifier's own fallback?
-The classifier fails closed to CAUTION because a parse glitch on a single benign question shouldn't over-refuse. But by the time the responder runs, classify_safety_tier() already GUARANTEES a valid tier (it fails closed itself). So an invalid tier reaching the responder means the contract was violated — the safety classification is missing or broken entirely, and you have ZERO information about the risk level. The only safe assumption when you don't know the risk is the most conservative behavior: refuse and refer. Defaulting an unknown into "safe" or even "caution" would hand out instructions in a state where the safety layer is known to be broken.
+Why CAUTION: it fails safe without failing open. "safe" would hand out unguarded step-by-step instructions for a question whose risk we haven't actually established — too dangerous. "refuse" would stonewall a possibly-benign question and degrade usefulness — too blunt as a default for an unknown. CAUTION splits the difference: the user still gets help, but wrapped in explicit safety warnings and a clear "if in doubt, call a professional," which is the right posture when the risk level is genuinely unknown. This also mirrors the classifier's own fail-closed-to-caution default, keeping the whole pipeline consistent.
 ```
 
 ---
@@ -133,11 +132,13 @@ The classifier fails closed to CAUTION because a parse glitch on a single benign
 **A "refuse" response that was still too helpful and what you changed to fix it:**
 
 ```
-[your answer here]
+In early drafts that lacked the "applies to your ENTIRE response, including anything BEFORE recommending a professional" clause, refuse responses tended to open with a soft procedure ("First you'd shut off the gas at the meter...") and then pivot to "but you should really call a pro." The fix was two-fold: (1) scope the prohibition to the whole response, not just the conclusion, and (2) add a defense-in-depth backstop in code — _leaks_procedure() scans refuse-tier output for numbered steps and procedural verbs (splice, solder, "shut off the", "turn the valve", etc.); on a hit it regenerates once, then falls back to a canned referral. With the entire-response clause in place, the live tests stopped leaking and the backstop never had to fire — but it's there if a future prompt or model regresses.
 ```
 
 **The tier where the LLM's default behavior was closest to what you wanted (and which tier required the most prompt iteration):**
 
 ```
-[your answer here]
+Closest to default: SAFE. With almost no prompting the model already gives helpful, specific step-by-step repair answers — that is its natural behavior, so the safe prompt is mostly about trimming unnecessary disclaimers.
+
+Most iteration: REFUSE. The model's instinct is to be maximally helpful, which directly fights the goal of withholding instructions. Getting it to refuse the task while STILL being useful (naming the hazard, the right professional, and permit needs) — without sliding back into partial how-to — took the most careful, explicit, behavioral wording, plus the code-level backstop. CAUTION sat in between: the default answer was close, but it needed the explicit "lead with the risk + shut-off precaution" and "firm pro recommendation" instructions to stop reading like a plain how-to with a disclaimer bolted on.
 ```
