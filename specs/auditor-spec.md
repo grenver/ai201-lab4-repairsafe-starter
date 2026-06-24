@@ -43,8 +43,8 @@ Record every interaction — question, safety tier, and response preview — to 
 | `"tier"` | `str` | Safety tier assigned to this question |
 | `"question"` | `str` | The user's question, truncated to 300 characters |
 | `"response_preview"` | `str` | First 200 characters of the generated response |
-| `[your field]` | `[type]` | [description] |
-| `[your field]` | `[type]` | [description] |
+| `"reason"` | `str` | The classifier's one-sentence justification for the tier — lets a reviewer audit *why* a tier was assigned, not just *what*, which is what you actually need to diagnose a cluster of misclassifications |
+| `"model"` | `str` | The LLM model id used (`LLM_MODEL`) — so errors can be correlated with a specific model version after an upgrade or swap |
 
 ---
 
@@ -53,7 +53,14 @@ Record every interaction — question, safety tier, and response preview — to 
 *The required fields truncate the question to 300 characters and the response to 200. Write down the reasoning for each — what would you lose by truncating more aggressively, and what's the risk of logging the full text at production scale?*
 
 ```
-[your answer here]
+Question @ 300 chars: keeps virtually all real repair questions intact (most are a sentence or two) while capping pathological or pasted-in inputs. Truncating more aggressively risks cutting the very clause that drove a misclassification — e.g. the word "add" vs. "replace," or "gas," might fall past the cutoff and you'd lose the evidence you need to debug the cluster.
+
+Response @ 200 chars: this is a PREVIEW, not the full answer. 200 chars is enough to eyeball tone and spot the failure that matters most here — whether a "refuse" response leaked actual how-to steps in its opening — without storing the whole response. The full response is reproducible from the question + tier + model + prompt if needed.
+
+Risk of logging full text at production scale:
+- Storage growth — full questions and responses multiply log volume fast at thousands/day.
+- Privacy & liability — questions may contain addresses, names, or other PII; the log becomes a larger breach target and a bigger compliance burden. Truncation is a cost AND privacy control.
+The tradeoff to watch: truncating too aggressively hides the diagnostic signal; logging everything creates a storage/privacy liability. 300/200 is a deliberate middle ground.
 ```
 
 ---
@@ -63,7 +70,14 @@ Record every interaction — question, safety tier, and response preview — to 
 *What happens if `logs/` doesn't exist when the function runs for the first time? How will you handle that — and why is this worth thinking about at all?*
 
 ```
-[your answer here]
+If logs/ doesn't exist, opening LOG_FILE in append mode raises FileNotFoundError — the log write fails, and depending on where it's called, can crash the request mid-pipeline.
+
+Handle it by ensuring the parent directory exists before opening:
+  from pathlib import Path
+  Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+(exist_ok=True makes it idempotent and safe to call on every write.)
+
+Why it matters: the repo ships logs/.gitkeep so the directory exists in dev, which makes this easy to overlook. But a fresh clone/deploy, a CI runner, or simply running from a different working directory may not have it. Audit logging that silently fails is worse than no logging — you'd believe you have an accountability record that doesn't actually exist.
 ```
 
 ---
@@ -73,7 +87,14 @@ Record every interaction — question, safety tier, and response preview — to 
 *Write an example of what you want the one-line terminal summary to look like after a question is logged. Be specific about format.*
 
 ```
-[your example output here]
+Format: [<timestamp>] <TIER> | "<question, first ~60 chars>" | response <N> chars logged
+
+Examples:
+[2026-06-23T14:32:10Z] REFUSE  | "How do I extend my gas line to a new stove?" | response 142 chars logged
+[2026-06-23T14:33:01Z] CAUTION | "Can I replace the outlet in my living room?" | response 318 chars logged
+[2026-06-23T14:33:44Z] SAFE    | "How do I patch a small hole in my drywall?"  | response 506 chars logged
+
+Tier is upper-cased and padded so the column lines up when scanning a stream of logs; the response length confirms a response was actually generated and lets you spot a suspiciously short/empty one at a glance.
 ```
 
 ---
