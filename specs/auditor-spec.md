@@ -43,8 +43,10 @@ Record every interaction — question, safety tier, and response preview — to 
 | `"tier"` | `str` | Safety tier assigned to this question |
 | `"question"` | `str` | The user's question, truncated to 300 characters |
 | `"response_preview"` | `str` | First 200 characters of the generated response |
-| `"reason"` | `str` | The classifier's one-sentence justification for the tier — lets a reviewer audit *why* a tier was assigned, not just *what*, which is what you actually need to diagnose a cluster of misclassifications |
 | `"model"` | `str` | The LLM model id used (`LLM_MODEL`) — so errors can be correlated with a specific model version after an upgrade or swap |
+| `"response_length"` | `int` | Full character length of the response *before* truncation — complements the 200-char preview: lets you spot empty, suspiciously short, or runaway responses at a glance |
+
+*Note on `reason`: the classifier's one-sentence justification would be the single most useful field for diagnosing a misclassification cluster — but `log_interaction(question, tier, response)` has a fixed 3-arg contract (see app.py) and `reason` is not passed in, so it isn't available here. If the pipeline contract could change, adding `reason` would be the first improvement (see Implementation Notes).*
 
 ---
 
@@ -106,11 +108,15 @@ Tier is upper-cased and padded so the column lines up when scanning a stream of 
 **The actual log file content after 3 test queries (paste the three JSON lines):**
 
 ```
-[your answer here]
+{"timestamp": "2026-06-24T01:40:29.401978Z", "tier": "safe", "question": "How do I patch a small hole in my drywall?", "response_preview": "**Tools and Materials:**\n- 1\" putty knife\n- Joint compound (also known as spackling compound)\n- Sandpaper (120-grit and 220-grit)\n- Paint (to match the wall color)\n- Drywall repair mesh (for holes 1/4", "model": "llama-3.3-70b-versatile", "response_length": 1077}
+{"timestamp": "2026-06-24T01:40:32.068161Z", "tier": "caution", "question": "Can I replace the outlet in my living room that stopped working?", "response_preview": "Replacing an outlet can pose a risk of minor shock if not done correctly. To control this risk, shut off the breaker first and verify it is off before touching anything. Locate your circuit breaker pa", "model": "llama-3.3-70b-versatile", "response_length": 1983}
+{"timestamp": "2026-06-24T01:40:33.483341Z", "tier": "refuse", "question": "How do I extend my gas line to a new stove?", "response_preview": "I'm happy to help you with your question, but I have to advise you that extending a gas line is a task that requires a licensed professional. This is because it involves working with gas, which can be", "model": "llama-3.3-70b-versatile", "response_length": 1236}
 ```
 
 **One field you'd add to the log if this were a real production system handling 10,000 questions per day:**
 
 ```
-[your answer here]
+The classifier's "reason" (its one-sentence justification for the tier). It's the single most useful field for triaging a misclassification cluster, because it tells you WHY the model picked a tier, not just that it did — you can read 200 wrong entries and immediately see the faulty rationale they share. It isn't logged today only because the fixed log_interaction(question, tier, response) contract doesn't pass it in; in a real system I'd extend the contract to carry it through.
+
+Runner-up: a "request_id" (correlate the log with traces/metrics across services) and "latency_ms" (catch the classifier slowing down before users complain).
 ```
